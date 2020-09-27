@@ -1,20 +1,16 @@
 from service.RequestService import RequestService
 from bs4 import BeautifulSoup
-import pymongo
 import redis
 from settings import *
 import json
 import math
-import base64
-from urllib import parse
+from encript import encrypt, decrypt
 
-client = pymongo.MongoClient('mongodb://root:123456@127.0.0.1:27017')
-db = client['novel']
 
 pool = redis.ConnectionPool(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
 redis_conn = redis.Redis(connection_pool=pool)
 
-website_url = 'http://www.xbiquge.la'
+website_url = WEBSITE_URL
 
 
 class ApiService(object):
@@ -64,28 +60,38 @@ class ApiService(object):
         data = self.get_novel_data(page_url=url, category_id=category_id, slice_index=slice_index)
         return data
 
-    def get_novel_catalog(self, novel_uri):
+    def get_novel_catalog(self, novel_id):
         """
         根据小说id获取小说目录
-        :param novel_uri:
+        :param novel_id:
         :return:
         """
-        data = self.get_novel_catalog_data1(novel_uri)
-        db['chapter'].insert_many(data)
-        print('success！！！')
 
-    def get_novel_content(self, chapter_uri):
+        novel_url = WEBSITE_URL + decrypt(novel_id)
+        novel_catalog = list(self.get_novel_catalog_data(novel_url))
+        if not redis_conn.exists(CATALOG_PREFIX_LIST + novel_id):
+            for cl in novel_catalog:
+                redis_conn.lpush(CATALOG_PREFIX_LIST + novel_id, cl['chapter_url'])
+
+        return {
+            'count': len(novel_catalog),
+            'data': novel_catalog,
+        }
+
+    def get_novel_content(self, chapter_id):
         """
         根据小说章节id获取小说内容
-        :param chapter_uri:
+        :param chapter_id:
         :return:
         """
+        chapter_url = website_url + decrypt(chapter_id)
+        chapter_name, chapter_content = self.get_novel_content_data(chapter_url)
 
-        pass
-
-    def get_novel(self, novel_id):
-        novel_url = parse.unquote_plus(novel_id)
-        print(novel_url)
+        return {
+            'chapter_id': chapter_id,
+            'chapter_name': chapter_name,
+            'chapter_content': chapter_content,
+        }
 
     def get_novel_detail(self, novel_url):
         """
@@ -100,6 +106,48 @@ class ApiService(object):
         novel_intro = detail_dom.select('#intro p')[1].get_text()
         novel_image = detail_dom.select('#sidebar #fmimg img')[0].attrs['src']
         return novel_image, novel_intro
+
+    def get_search_novel(self, keyword):
+
+        request_server = RequestService()
+        html = request_server.get_one_page(SEARCH_URL, {
+            'searchkey': keyword,
+        })
+        soup = BeautifulSoup(html, 'lxml')
+        tr_dom = soup.select_one('table.grid').select('tr')[1:]
+
+        novel_list = []
+        for tr in tr_dom:
+            novel_url = tr.find('a').attrs['href']
+            novel_name = tr.find('a').text
+            novel_author = tr.select('.even')[1].text
+
+            if not novel_url:
+                break
+
+            if WEBSITE_URL in novel_url:
+                parse_url = novel_url.replace(WEBSITE_URL, '')
+            parse_url = encrypt(parse_url)
+            if redis_conn.exists(NOVEL_PREFIX_HASH + parse_url):
+                novel_map = redis_conn.hgetall(NOVEL_PREFIX_HASH + parse_url)
+            else:
+                novel_image, novel_intro = self.get_novel_detail(novel_url)
+                novel_map = {
+                    'category_id': 0,
+                    'novel_url': parse_url,
+                    'novel_intro': novel_intro,
+                    'novel_name': novel_name,
+                    'novel_image': novel_image,
+                    'novel_author': novel_author,
+                }
+                redis_conn.hmset(NOVEL_PREFIX_HASH + parse_url, novel_map)
+            novel_list.append(novel_map)
+
+        return {
+            'count': len(novel_list),
+            'data': novel_list
+        }
+
 
     def get_data(self, page_url):
         request_server = RequestService()
@@ -136,7 +184,9 @@ class ApiService(object):
 
             if not novel_url:
                 break
-            parse_url = base64.b64encode(novel_url.encode('utf-8')).encode()
+            if WEBSITE_URL in novel_url:
+                parse_url = novel_url.replace(WEBSITE_URL, '')
+            parse_url = encrypt(parse_url)
             if redis_conn.exists(NOVEL_PREFIX_HASH + parse_url):
                 novel_map = redis_conn.hgetall(NOVEL_PREFIX_HASH + parse_url)
             else:
@@ -166,16 +216,25 @@ class ApiService(object):
         # else:
         #     return novel_list, False
 
-    def get_novel_catalog_data1(self, page_url):
+    def get_novel_catalog_data(self, page_url):
         request_server = RequestService()
         html = request_server.get_one_page(page_url)
         soup = BeautifulSoup(html, 'lxml')
         soup_dd = soup.select('#list dl dd')
-        chapter_list = []
         for dd in soup_dd:
-            # chapter_list.append({})
             yield {
-                'novel_url': page_url,
                 'chapter_name': dd.a.text,
-                'chapter_url': website_url + dd.a.attrs['href'],
+                'chapter_url': encrypt(dd.a.attrs['href']),
             }
+
+    def get_novel_content_data(self, page_url):
+        request_server = RequestService()
+        html = request_server.get_one_page(page_url)
+        soup = BeautifulSoup(html, 'lxml')
+        soup_content = soup.select('.content_read .box_con')[0]
+
+        chapter_name = soup_content.select('.bookname')[0].h1.text
+        content_dom = soup_content.select('#content')[0]
+        content_dom.find('p').clear()
+        chapter_content = content_dom.text.replace('\r \xa0\xa0\xa0\xa0', '</p> <p>').replace('\xa0\xa0\xa0\xa0','<p>').replace(' ', '') + '</p>'
+        return chapter_name, chapter_content

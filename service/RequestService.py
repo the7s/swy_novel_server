@@ -20,9 +20,9 @@ def get_header():
 
 class RequestService(object):
 
-    def get_one_page(self, url):
+    def get_one_page(self, url, params={}):
         headers = get_header()
-        response = requests.get(url, headers=headers)
+        response = requests.get(url, headers=headers, params=params)
         if response.status_code == 200:
             return response.content
         else:

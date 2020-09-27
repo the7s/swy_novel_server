@@ -1,6 +1,8 @@
-from urllib import parse
 
-if __name__ == '__main__':
-    a = 'https://amoker.com/'
 
-    print(parse.quote_from_bytes(a))
+def encrypt(string):
+    return string.replace('/', '^').replace('.', '*')
+
+
+def decrypt(string):
+    return string.replace('^', '/').replace('*', '.')
