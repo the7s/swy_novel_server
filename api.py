@@ -1,57 +1,77 @@
 from flask import Flask
-from flask_restful import reqparse, abort, Api, Resource
 from service.ApiService import ApiService
+from flask_jwt import JWT, jwt_required, current_identity
+from werkzeug.security import safe_str_cmp
+
+
+class User(object):
+    def __init__(self, id, username, password):
+        self.id = id
+        self.username = username
+        self.password = password
+
+    def __str__(self):
+        return "User(id='%s')" % self.id
+
+
+users = [
+    User(1, 'user1', 'abcxyz'),
+    User(2, 'user2', 'abcxyz'),
+]
+
+username_table = {u.username: u for u in users}
+userid_table = {u.id: u for u in users}
+
+
+def authenticate(username, password):
+    user = username_table.get(username, None)
+    if user and safe_str_cmp(user.password.encode('utf-8'), password.encode('utf-8')):
+        return user
+
+
+def identity(payload):
+    user_id = payload['identity']
+    return userid_table.get(user_id, None)
+
 
 app = Flask(__name__)
-api = Api(app)
-
-parser = reqparse.RequestParser()
+app.debug = True
+app.config['SECRET_KEY'] = 'super-secret'
+jwt = JWT(app, authenticate, identity)
 
 api_service = ApiService()
 
 
-class Category(Resource):
-
-    def get(self):
-        data = api_service.get_novel_categories()
-        return data
-
-
-class NovelList(Resource):
-
-    def get(self, category_id=1, page_id=1):
-        data = api_service.get_novel_list(category_id, page_id)
-        return data
+@app.route('/')
+@app.route('/cat')
+def get_novel_categories():
+    data = api_service.get_novel_categories()
+    return data
 
 
-class Novel(Resource):
-
-    def get(self, novel_id):
-        data = api_service.get_novel_catalog(novel_id)
-        return data
-
-
-class Chapter(Resource):
-
-    def get(self, chapter_id):
-
-        data = api_service.get_novel_content(chapter_id)
-        return data
-    
-
-class Search(Resource):
-
-    def get(self, keyword):
-        data = api_service.get_search_novel(keyword)
-        return data
+@app.route('/cat/<int:category_id>/page/<int:page_id>')
+def get_novels(category_id=1, page_id=1):
+    data = api_service.get_novel_list(category_id, page_id)
+    return data
 
 
-api.add_resource(Category, '/', '/cat')
-api.add_resource(NovelList, '/cat/<int:category_id>/page/<int:page_id>')
-api.add_resource(Novel, '/novel/<string:novel_id>')
-api.add_resource(Chapter, '/chapter/<string:chapter_id>')
-api.add_resource(Search, '/search/<string:keyword>')
+@app.route('/catalog/<string:novel_id>')
+def get_catalog(novel_id):
+    data = api_service.get_novel_catalog(novel_id)
+    return data
+
+
+@app.route('/chapter/<string:chapter_id>')
+def chapter(chapter_id):
+    data = api_service.get_novel_content(chapter_id)
+    return data
+
+
+@app.route('/search/<string:keyword>')
+def search(keyword):
+    data = api_service.get_search_novel(keyword)
+    return data
 
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run()

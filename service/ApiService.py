@@ -58,6 +58,11 @@ class ApiService(object):
         url = WEBSITE_FENLEI + '/' + str(category_id) + '_' + str(math.ceil(page/3)) + '.html'
 
         data = self.get_novel_data(page_url=url, category_id=category_id, slice_index=slice_index)
+
+        return {
+            'count': len(data),
+            'data': data
+        }
         return data
 
     def get_novel_catalog(self, novel_id):
