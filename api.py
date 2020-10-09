@@ -2,6 +2,7 @@ from flask import Flask
 from service.ApiService import ApiService
 from flask_jwt import JWT, jwt_required, current_identity
 from werkzeug.security import safe_str_cmp
+from flask_restful import reqparse
 
 
 class User(object):
@@ -15,8 +16,8 @@ class User(object):
 
 
 users = [
-    User(1, 'user1', 'abcxyz'),
-    User(2, 'user2', 'abcxyz'),
+    User(1, 'user1', 'password1'),
+    User(2, 'user2', 'password2'),
 ]
 
 username_table = {u.username: u for u in users}
@@ -49,9 +50,16 @@ def get_novel_categories():
     return data
 
 
-@app.route('/cat/<int:category_id>/page/<int:page_id>')
-def get_novels(category_id=1, page_id=1):
-    data = api_service.get_novel_list(category_id, page_id)
+# @app.route('/novels/<int:category_id>/page/<int:page_id>')
+@app.route('/novels')
+def get_novels():
+    parser = reqparse.RequestParser()
+    parser.add_argument('category_id', type=int, help='category_id cannot be converted')
+    parser.add_argument('page', type=int, help='page cannot be converted')
+    args = parser.parse_args()
+    category_id = args['category_id'] if args['category_id'] is not None else 1
+    page = args['page'] if args['page'] is not None else 1
+    data = api_service.get_novel_list(category_id, page)
     return data
 
 
